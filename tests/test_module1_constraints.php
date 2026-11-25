@@ -11,6 +11,14 @@ $tests = [];
 try {
     $db->beginTransaction();
 
+    // Record the existing assignments before testing invalid inserts.
+    $q = $db->query(
+        'SELECT COUNT(*) FROM staff_departments
+         WHERE company_id=1 AND user_id=1'
+    );
+
+    $initialAssignmentCount = (int) $q->fetchColumn();
+
     $crossCompanyRejected = false;
 
     try {
@@ -19,6 +27,7 @@ try {
              (company_id,user_id,department_id,is_primary)
              VALUES (1,1,2,0)'
         );
+
         $q->execute();
 
     } catch (PDOException $exception) {
@@ -37,6 +46,7 @@ try {
              (company_id,user_id,department_id,is_primary)
              VALUES (1,1,1,1)'
         );
+
         $q->execute();
 
     } catch (PDOException $exception) {
@@ -53,15 +63,17 @@ try {
     );
 
     $tests['Exactly one primary department remains'] =
-        (int)$q->fetchColumn() === 1;
+        (int) $q->fetchColumn() === 1;
 
     $q = $db->query(
         'SELECT COUNT(*) FROM staff_departments
          WHERE company_id=1 AND user_id=1'
     );
 
+    $finalAssignmentCount = (int) $q->fetchColumn();
+
     $tests['Rejected inserts created no assignments'] =
-        (int)$q->fetchColumn() === 1;
+        $finalAssignmentCount === $initialAssignmentCount;
 
 } catch (Throwable $exception) {
     fwrite(

@@ -18,32 +18,57 @@ $actor = [
 $companyId = 1;
 $userId = 1;
 $secondaryDepartmentId = 1;
-$originalPrimaryId = 17;
 
 $tests = [];
 $createdAuditIds = [];
 $assignmentCreated = false;
 $baselineAuditId = 0;
-$baselineAssignmentExists = false;
 
 try {
+    // Discover the current primary department.
     $q = $db->prepare(
-        'SELECT COUNT(*) FROM staff_departments
-         WHERE company_id=? AND user_id=? AND department_id=?'
+        'SELECT department_id
+         FROM staff_departments
+         WHERE company_id=?
+           AND user_id=?
+           AND is_primary=1'
     );
-    $q->execute([$companyId, $userId, $secondaryDepartmentId]);
-    $baselineAssignmentExists = (int)$q->fetchColumn() > 0;
 
-    if ($baselineAssignmentExists) {
+    $q->execute([$companyId, $userId]);
+    $originalPrimaryId = $q->fetchColumn();
+
+    if ($originalPrimaryId === false) {
+        throw new RuntimeException(
+            'No primary department exists for the test user.'
+        );
+    }
+
+    // Ensure the secondary test assignment does not exist.
+    $q = $db->prepare(
+        'SELECT COUNT(*)
+         FROM staff_departments
+         WHERE company_id=?
+           AND user_id=?
+           AND department_id=?'
+    );
+
+    $q->execute([
+        $companyId,
+        $userId,
+        $secondaryDepartmentId
+    ]);
+
+    if ((int) $q->fetchColumn() > 0) {
         throw new RuntimeException(
             'Secondary test assignment already exists; refusing to modify it.'
         );
     }
 
-    $baselineAuditId = (int)$db->query(
+    $baselineAuditId = (int) $db->query(
         'SELECT COALESCE(MAX(id),0) FROM audit_logs'
     )->fetchColumn();
 
+    // Create a secondary department assignment.
     $service->assignStaff(
         $actor,
         $userId,
@@ -54,21 +79,42 @@ try {
     $assignmentCreated = true;
 
     $q = $db->prepare(
-        'SELECT is_primary FROM staff_departments
-         WHERE company_id=? AND user_id=? AND department_id=?'
+        'SELECT is_primary
+         FROM staff_departments
+         WHERE company_id=?
+           AND user_id=?
+           AND department_id=?'
     );
-    $q->execute([$companyId, $userId, $secondaryDepartmentId]);
+
+    $q->execute([
+        $companyId,
+        $userId,
+        $secondaryDepartmentId
+    ]);
+
+    $secondaryStatus = $q->fetchColumn();
 
     $tests['Secondary department assignment created'] =
-        (int)$q->fetchColumn() === 0;
+        $secondaryStatus !== false
+        && (int) $secondaryStatus === 0;
 
-    $q->execute([$companyId, $userId, $originalPrimaryId]);
+    // Verify that the original primary assignment remains.
+    $q->execute([
+        $companyId,
+        $userId,
+        (int) $originalPrimaryId
+    ]);
+
+    $primaryStatus = $q->fetchColumn();
 
     $tests['Original primary department preserved'] =
-        (int)$q->fetchColumn() === 1;
+        $primaryStatus !== false
+        && (int) $primaryStatus === 1;
 
+    // Verify the audit event.
     $q = $db->prepare(
-        "SELECT id, new_values FROM audit_logs
+        "SELECT id, new_values
+         FROM audit_logs
          WHERE company_id=?
            AND actor_user_id=?
            AND action='staff.department_assigned'
@@ -87,7 +133,7 @@ try {
     $audits = $q->fetchAll(PDO::FETCH_ASSOC);
 
     foreach ($audits as $audit) {
-        $createdAuditIds[] = (int)$audit['id'];
+        $createdAuditIds[] = (int) $audit['id'];
     }
 
     $tests['Assignment audit record created'] =
@@ -99,7 +145,7 @@ try {
 
     $tests['Audit identifies correct department'] =
         is_array($auditValues)
-        && (int)($auditValues['department_id'] ?? 0)
+        && (int) ($auditValues['department_id'] ?? 0)
             === $secondaryDepartmentId;
 
 } catch (Throwable $exception) {
@@ -111,15 +157,19 @@ try {
     $tests['Department mutation execution'] = false;
 
 } finally {
+    // Remove only records created by this test.
     try {
         $db->beginTransaction();
 
         if ($assignmentCreated) {
             $q = $db->prepare(
                 'DELETE FROM staff_departments
-                 WHERE company_id=? AND user_id=?
-                   AND department_id=? AND is_primary=0'
+                 WHERE company_id=?
+                   AND user_id=?
+                   AND department_id=?
+                   AND is_primary=0'
             );
+
             $q->execute([
                 $companyId,
                 $userId,
