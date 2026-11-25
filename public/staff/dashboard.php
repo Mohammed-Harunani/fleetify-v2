@@ -64,6 +64,8 @@ $modules = [
     ],
 ];
 
+$canViewFleet = $access->can('fleet.view', $staff) || $access->can('vehicles.manage', $staff);
+
 // Department Management uses the database-backed permissions
 // introduced in Phase 24.
 $canViewDepartments =
@@ -180,6 +182,14 @@ $canViewDepartments =
 
     <!-- MODULE GRID -->
     <section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+        <?php if ($canViewFleet): ?>
+        <a href="fleet/index.php" class="group block bg-white rounded-2xl border border-blue-200 shadow-sm p-6 hover:shadow-lg hover:border-blue-400 transition">
+          <div class="text-3xl">🚛</div><h4 class="text-xl font-semibold mt-5">Fleet & Workshop Management</h4>
+          <p class="text-slate-500 mt-2 text-sm">Vehicles, drivers, odometer, maintenance and safety.</p>
+          <p class="mt-6 text-blue-700 font-semibold text-sm">Open Fleet Workspace &rarr;</p>
+        </a>
+        <?php endif; ?>
 
         <!-- DEPARTMENT MANAGEMENT -->
         <?php if ($canViewDepartments): ?>
